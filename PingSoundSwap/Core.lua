@@ -445,6 +445,7 @@ function PingSoundSwap:HandleSlash(msg)
         Print("/pss custom <profileKey>");
         Print("/pss set <attack|warning|assist|onmyway> <soundID>");
         Print("/pss test <attack|warning|assist|onmyway>");
+        Print("/pss find <text> - Search SOUNDKIT constants");
         return;
     end
 
@@ -515,6 +516,43 @@ function PingSoundSwap:HandleSlash(msg)
             Print(string.format("Played %s sound (%d).", pingType, soundID));
         else
             Print("Could not play sound. Check ID and audio settings.");
+        end
+        return;
+    end
+
+    if command == "find" then
+        local query = string.lower(table.concat(args, " ", 2));
+        if query == "" then
+            Print("Usage: /pss find <text>");
+            return;
+        end
+
+        if type(SOUNDKIT) ~= "table" then
+            Print("SOUNDKIT table is not available.");
+            return;
+        end
+
+        local results = {};
+        for name, id in pairs(SOUNDKIT) do
+            if type(name) == "string" and type(id) == "number" and string.find(string.lower(name), query, 1, true) then
+                table.insert(results, { name = name, id = id });
+            end
+        end
+
+        table.sort(results, function(a, b)
+            return a.name < b.name;
+        end);
+
+        if #results == 0 then
+            Print("No SOUNDKIT matches found.");
+            return;
+        end
+
+        local maxResults = math.min(#results, 30);
+        Print(string.format("Found %d match(es). Showing %d:", #results, maxResults));
+        for i = 1, maxResults do
+            local item = results[i];
+            Print(string.format("%s = %d", item.name, item.id));
         end
         return;
     end
