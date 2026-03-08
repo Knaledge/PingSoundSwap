@@ -30,6 +30,15 @@ local TEXTUREKIT_TO_PING = {
     OnMyWay = "OnMyWay",
 };
 
+local function IsValidPingType(pingType)
+    for _, value in ipairs(PING_TYPES) do
+        if value == pingType then
+            return true;
+        end
+    end
+    return false;
+end
+
 local function Print(msg)
     DEFAULT_CHAT_FRAME:AddMessage(PREFIX .. tostring(msg));
 end
@@ -189,7 +198,7 @@ function PingSoundSwap:GetSoundForPing(pingType)
 end
 
 function PingSoundSwap:SetSoundForPing(pingType, soundID)
-    if not tContains(PING_TYPES, pingType) then
+    if not IsValidPingType(pingType) then
         return false;
     end
 
