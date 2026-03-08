@@ -53,6 +53,7 @@ Sound list bucket behavior:
 	- `Curated` contains common high-signal sounds.
 	- Other buckets are grouped by first character (`A`-`Z`, `0-9`, `Other`) to avoid giant unusable menus.
 	- Changing the bucket limits the Ping Sound dropdown to that subset only.
+	- Non-curated buckets are capped to a native-dropdown-safe list size; use `/pss find <text>` for precise SOUNDKIT lookup.
 
 Sound option labels:
 
@@ -83,7 +84,7 @@ Sound option labels:
 
 - PingSoundSwap uses a safe, non-invasive hook strategy to avoid modifying secure ping send paths.
 - The native ping system remains intact; PingSoundSwap overlays custom audio behavior.
-- If `Suppress Native Ping Sounds` is enabled, the addon attempts to set `pingSounds=0` so only replacement sounds are heard.
+- If `Suppress Native Ping Sounds` is enabled, the addon sets `Sound_EnablePingSounds=0` so only replacement sounds are heard.
 
 ## Current Version
 

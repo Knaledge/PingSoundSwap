@@ -10,6 +10,7 @@ PingSoundSwap.soundIndex = nil;
 PingSoundSwap.soundBucketKeys = nil;
 PingSoundSwap.soundOptionsByBucket = nil;
 PingSoundSwap.lastPlayedAt = {};
+PingSoundSwap.isPinStyleHooked = false;
 
 local DB_VERSION = 1;
 local PREFIX = "|cff4dc3ffPingSoundSwap:|r ";
@@ -298,8 +299,12 @@ function PingSoundSwap:PlaySoundMaster(soundID)
     end
 
     if C_Sound and C_Sound.PlaySound then
-        local ok = C_Sound.PlaySound(soundID, "Master");
-        if ok then
+        local result = C_Sound.PlaySound(soundID, "Master");
+        if type(result) == "table" then
+            if result.success then
+                return true;
+            end
+        elseif result then
             return true;
         end
     end
@@ -314,11 +319,12 @@ function PingSoundSwap:ApplyNativePingSuppression()
         return;
     end
 
+    local cvarName = "Sound_EnablePingSounds";
     local desired = self.db.suppressNativePingSounds and "0" or "1";
-    local current = GetCVar("pingSounds");
+    local current = GetCVar(cvarName);
     if current ~= desired then
-        SetCVar("pingSounds", desired);
-        self:Debug(string.format("Set CVar pingSounds=%s", desired));
+        SetCVar(cvarName, desired);
+        self:Debug(string.format("Set CVar %s=%s", cvarName, desired));
     end
 end
 
@@ -438,6 +444,26 @@ function PingSoundSwap:TryHookPingManager()
     end
 end
 
+function PingSoundSwap:TryHookPingPinStyle()
+    if self.isPinStyleHooked then
+        self:Debug("TryHookPingPinStyle skipped: already hooked.");
+        return;
+    end
+
+    if type(PingPinFrameMixin) == "table" and type(PingPinFrameMixin.SetPinStyle) == "function" then
+        hooksecurefunc(PingPinFrameMixin, "SetPinStyle", function(_, uiTextureKit, _isWorldPoint)
+            local pingType = TEXTUREKIT_TO_PING[uiTextureKit];
+            PingSoundSwap:PlayMappedPingSound(pingType, "PingPinFrameMixin:SetPinStyle");
+        end);
+
+        self.isPinStyleHooked = true;
+        Print("Ping pin style hook active.");
+        self:Debug("Hooked PingPinFrameMixin:SetPinStyle via hooksecurefunc.");
+    else
+        self:Debug("PingPinFrameMixin not ready; pin style hook deferred.");
+    end
+end
+
 function PingSoundSwap:GetSoundOptionData()
     return self:GetSoundOptionDataForBucket("curated");
 end
@@ -553,7 +579,13 @@ function PingSoundSwap:GetSoundOptionDataForBucket(bucketKey)
         return a.id < b.id;
     end);
 
-    for _, entry in ipairs(entries) do
+    local maxOptions = (bucketKey == "curated") and #entries or math.min(#entries, 200);
+    if maxOptions < #entries then
+        self:Debug(string.format("Bucket %s trimmed from %d to %d entries for native dropdown stability", tostring(bucketKey), #entries, maxOptions));
+    end
+
+    for i = 1, maxOptions do
+        local entry = entries[i];
         container:Add(entry.id, BuildSoundOptionLabel(entry.id, entry.name, entry.tag, entry.curated, entry.label));
     end
 
@@ -1021,13 +1053,16 @@ function PingSoundSwap:OnEvent(event, ...)
     if event == "PLAYER_LOGIN" then
         self:InitializeDatabase();
         self:TryHookPingManager();
+        self:TryHookPingPinStyle();
         self:RegisterSettings();
     elseif event == "PLAYER_ENTERING_WORLD" then
         self:TryHookPingManager();
+        self:TryHookPingPinStyle();
     elseif event == "ADDON_LOADED" then
         local addonName = ...;
         if addonName == "Blizzard_PingUI" then
             self:TryHookPingManager();
+            self:TryHookPingPinStyle();
         elseif addonName == "Blizzard_Settings_Shared" then
             self:RegisterSettings();
         end
