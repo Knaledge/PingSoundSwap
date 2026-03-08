@@ -1,0 +1,9 @@
+## Interface: 120000
+## Title: PingSoundSwap
+## Notes: Swap World of Warcraft Ping System sounds per ping type with profile support.
+## Author: Knaledge
+## Version: 0.1.0
+## SavedVariables: PingSoundSwapDB
+## SavedVariablesPerCharacter: PingSoundSwapCharDB
+
+Core.lua
