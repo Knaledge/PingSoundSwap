@@ -45,6 +45,16 @@ local function Print(msg)
     DEFAULT_CHAT_FRAME:AddMessage(PREFIX .. tostring(msg));
 end
 
+function PingSoundSwap:IsDebugEnabled()
+    return self.db and self.db.debug == true;
+end
+
+function PingSoundSwap:Debug(msg)
+    if self:IsDebugEnabled() then
+        Print("[debug] " .. tostring(msg));
+    end
+end
+
 local function SK(name, fallback)
     if SOUNDKIT and type(SOUNDKIT[name]) == "number" then
         return SOUNDKIT[name];
@@ -237,15 +247,18 @@ end
 function PingSoundSwap:OnPingPinFrameAdded(_frame, uiTextureKit, _isWorldPoint)
     local pingType = TEXTUREKIT_TO_PING[uiTextureKit];
     if not pingType then
+        self:Debug(string.format("Ignored ping texture kit '%s'", tostring(uiTextureKit)));
         return;
     end
 
     local soundID = self:GetSoundForPing(pingType);
+    self:Debug(string.format("Ping type=%s texture=%s soundID=%s", pingType, tostring(uiTextureKit), tostring(soundID)));
     self:PlaySoundMaster(soundID);
 end
 
 function PingSoundSwap:TryHookPingManager()
     if self.isPingHooked then
+        self:Debug("TryHookPingManager skipped: already hooked.");
         return;
     end
 
@@ -255,6 +268,9 @@ function PingSoundSwap:TryHookPingManager()
         end);
         self.isPingHooked = true;
         Print("Ping hook active.");
+        self:Debug("Hooked PingManager:OnPingPinFrameAdded via hooksecurefunc.");
+    else
+        self:Debug("PingManager not ready; hook deferred.");
     end
 end
 
@@ -408,6 +424,7 @@ function PingSoundSwap:PrintStatus()
     local profile, key = self:GetActiveProfile();
     Print(string.format("Mode: %s", self:GetActiveMode()));
     Print(string.format("Profile: %s", key));
+    Print(string.format("Debug: %s", self:IsDebugEnabled() and "on" or "off"));
 
     for _, pingType in ipairs(PING_TYPES) do
         Print(string.format("%s = %d", pingType, profile.sounds[pingType]));
@@ -453,6 +470,26 @@ function PingSoundSwap:HandleSlash(msg)
         Print("/pss set <attack|warning|assist|onmyway> <soundID>");
         Print("/pss test <attack|warning|assist|onmyway>");
         Print("/pss find <text> - Search SOUNDKIT constants");
+        Print("/pss debug <on|off|status> - Toggle or show debug logging");
+        return;
+    end
+
+    if command == "debug" then
+        local state = string.lower(args[2] or "status");
+        if state == "on" then
+            self.db.debug = true;
+            Print("Debug logging enabled.");
+        elseif state == "off" then
+            self.db.debug = false;
+            Print("Debug logging disabled.");
+        elseif state == "status" then
+            Print(string.format("Debug logging is %s.", self:IsDebugEnabled() and "on" or "off"));
+        else
+            Print("Usage: /pss debug <on|off|status>");
+            return;
+        end
+
+        self:Debug("Debug command processed.");
         return;
     end
 
@@ -579,14 +616,19 @@ function PingSoundSwap:InitializeDatabase()
 
     self.db.profiles = self.db.profiles or {};
     self.db.profileMode = self.db.profileMode or "character";
+    if type(self.db.debug) ~= "boolean" then
+        self.db.debug = false;
+    end
 
     PingSoundSwapCharDB.customProfileKey = NormalizeCustomKey(PingSoundSwapCharDB.customProfileKey or "default");
 
     self:InvalidateActiveProfileCache();
     self:GetActiveProfile();
+    self:Debug("Database initialized.");
 end
 
 function PingSoundSwap:OnEvent(event, ...)
+    self:Debug(string.format("Event received: %s", tostring(event)));
     if event == "PLAYER_LOGIN" then
         self:InitializeDatabase();
         self:TryHookPingManager();

@@ -58,6 +58,8 @@ Available controls:
 	- Play the configured sound for that ping type through Master.
 - `/pss find <text>`
 	- Search native SOUNDKIT constant names and IDs.
+- `/pss debug <on|off|status>`
+	- Toggle or show debug logging.
 
 ## Notes
 
