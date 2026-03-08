@@ -284,12 +284,15 @@ function PingSoundSwap:SetSoundForPing(pingType, soundID)
         return false;
     end
 
-    if type(soundID) ~= "number" or soundID <= 0 then
+    local numericSoundID = tonumber(soundID);
+    if type(numericSoundID) ~= "number" or numericSoundID <= 0 then
+        self:Debug(string.format("Rejected sound assignment for %s: value=%s", tostring(pingType), tostring(soundID)));
         return false;
     end
 
     local profile = self:GetActiveProfile();
-    profile.sounds[pingType] = math.floor(soundID);
+    profile.sounds[pingType] = math.floor(numericSoundID);
+    self:Debug(string.format("Set sound for %s to %d", tostring(pingType), profile.sounds[pingType]));
     return true;
 end
 
@@ -417,6 +420,11 @@ function PingSoundSwap:PlayMappedPingSound(pingType, source)
     end
 end
 
+function PingSoundSwap:PlayMappedPingSoundByEnum(enumType, source)
+    local pingType = ENUM_TO_PING[enumType];
+    self:PlayMappedPingSound(pingType, source);
+end
+
 function PingSoundSwap:TryHookPingManager()
     if self.isPingHooked then
         self:Debug("TryHookPingManager skipped: already hooked.");
@@ -433,6 +441,12 @@ function PingSoundSwap:TryHookPingManager()
             hooksecurefunc(PingManager, "OnPingAdded", function(...)
                 local pingType = PingSoundSwap:ExtractPingTypeFromArgs(...);
                 PingSoundSwap:PlayMappedPingSound(pingType, "OnPingAdded");
+            end);
+        end
+
+        if type(PingManager.ShowPingSpot) == "function" then
+            hooksecurefunc(PingManager, "ShowPingSpot", function(_, enumType, _posX, _posY)
+                PingSoundSwap:PlayMappedPingSoundByEnum(enumType, "ShowPingSpot");
             end);
         end
 
