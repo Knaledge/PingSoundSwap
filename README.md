@@ -42,6 +42,13 @@ Available controls:
 	- Assist Ping Sound
 	- OnMyWay Ping Sound
 
+Sound dropdown behavior:
+
+- Curated/common sounds are pinned at the top.
+- The full SOUNDKIT enumeration is included after curated entries.
+- Dropdown labels include tags such as `Curated`, `UI`, `Alert`, `Combat`, `Quest`, and `Misc`.
+- Each option includes both ID and constant name for easier searching/filtering in the menu.
+
 ## Slash Commands
 
 - `/pss open`

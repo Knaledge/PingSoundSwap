@@ -5,6 +5,7 @@ PingSoundSwap.settingsRegistered = false;
 PingSoundSwap.categoryID = nil;
 PingSoundSwap.activeProfile = nil;
 PingSoundSwap.activeProfileKey = nil;
+PingSoundSwap.soundOptionData = nil;
 
 local DB_VERSION = 1;
 local PREFIX = "|cff4dc3ffPingSoundSwap:|r ";
@@ -62,28 +63,48 @@ local function SK(name, fallback)
     return fallback;
 end
 
-local SOUND_OPTIONS = {
-    { id = SK("MAP_PING", 3175), label = "Map Ping" },
-    { id = SK("IG_MAINMENU_OPTION_CHECKBOX_ON", 856), label = "Checkbox On" },
-    { id = SK("IG_MAINMENU_OPTION_CHECKBOX_OFF", 857), label = "Checkbox Off" },
-    { id = SK("IG_MAINMENU_OPTION", 852), label = "Main Menu Option" },
-    { id = SK("IG_MAINMENU_OPEN", 850), label = "Main Menu Open" },
-    { id = SK("IG_MAINMENU_CLOSE", 851), label = "Main Menu Close" },
-    { id = SK("UI_BONUS_EVENT_SYSTEM_VIGNETTESOUND", 12867), label = "Bonus Event Vignette" },
-    { id = SK("UI_WORLDQUEST_START", 73275), label = "World Quest Start" },
-    { id = SK("UI_WORLDQUEST_MAP_SELECT", 73276), label = "World Quest Select" },
-    { id = SK("UI_WORLDQUEST_COMPLETE", 73277), label = "World Quest Complete" },
-    { id = SK("READY_CHECK", 8960), label = "Ready Check" },
-    { id = SK("RAID_WARNING", 8959), label = "Raid Warning" },
-    { id = SK("UI_GROUP_FINDER_RECEIVE_APPLICATION", 38417), label = "Group Finder Invite" },
-    { id = SK("UI_GROUP_FINDER_RECEIVE_APPLICATION_DECLINE", 38418), label = "Group Finder Decline" },
-    { id = SK("UI_GARRISON_TOAST_INVASION_ALERT", 10094), label = "Garrison Alert" },
-    { id = SK("UI_SILVER_MISSION_COMPLETE_01", 10218), label = "Mission Complete" },
-    { id = SK("UI_EPICLOOT_TOAST", 31578), label = "Epic Loot Toast" },
-    { id = SK("ALARM_CLOCK_WARNING_3", 18871), label = "Alarm Warning" },
-    { id = SK("UI_IG_STORE_WINDOW_OPEN_BUTTON", 68816), label = "Store Button Open" },
-    { id = SK("PVP_THROUGH_QUEUE", 8458), label = "PvP Through Queue" },
+local CURATED_SOUND_OPTIONS = {
+    { name = "MAP_PING", id = SK("MAP_PING", 3175), label = "Map Ping", tag = "Alert" },
+    { name = "IG_MAINMENU_OPTION_CHECKBOX_ON", id = SK("IG_MAINMENU_OPTION_CHECKBOX_ON", 856), label = "Checkbox On", tag = "UI" },
+    { name = "IG_MAINMENU_OPTION_CHECKBOX_OFF", id = SK("IG_MAINMENU_OPTION_CHECKBOX_OFF", 857), label = "Checkbox Off", tag = "UI" },
+    { name = "IG_MAINMENU_OPTION", id = SK("IG_MAINMENU_OPTION", 852), label = "Main Menu Option", tag = "UI" },
+    { name = "IG_MAINMENU_OPEN", id = SK("IG_MAINMENU_OPEN", 850), label = "Main Menu Open", tag = "UI" },
+    { name = "IG_MAINMENU_CLOSE", id = SK("IG_MAINMENU_CLOSE", 851), label = "Main Menu Close", tag = "UI" },
+    { name = "UI_BONUS_EVENT_SYSTEM_VIGNETTESOUND", id = SK("UI_BONUS_EVENT_SYSTEM_VIGNETTESOUND", 12867), label = "Bonus Event Vignette", tag = "Alert" },
+    { name = "UI_WORLDQUEST_START", id = SK("UI_WORLDQUEST_START", 73275), label = "World Quest Start", tag = "Quest" },
+    { name = "UI_WORLDQUEST_MAP_SELECT", id = SK("UI_WORLDQUEST_MAP_SELECT", 73276), label = "World Quest Select", tag = "Quest" },
+    { name = "UI_WORLDQUEST_COMPLETE", id = SK("UI_WORLDQUEST_COMPLETE", 73277), label = "World Quest Complete", tag = "Quest" },
+    { name = "READY_CHECK", id = SK("READY_CHECK", 8960), label = "Ready Check", tag = "Alert" },
+    { name = "RAID_WARNING", id = SK("RAID_WARNING", 8959), label = "Raid Warning", tag = "Alert" },
+    { name = "UI_GROUP_FINDER_RECEIVE_APPLICATION", id = SK("UI_GROUP_FINDER_RECEIVE_APPLICATION", 38417), label = "Group Finder Invite", tag = "Alert" },
+    { name = "UI_GROUP_FINDER_RECEIVE_APPLICATION_DECLINE", id = SK("UI_GROUP_FINDER_RECEIVE_APPLICATION_DECLINE", 38418), label = "Group Finder Decline", tag = "Alert" },
+    { name = "UI_GARRISON_TOAST_INVASION_ALERT", id = SK("UI_GARRISON_TOAST_INVASION_ALERT", 10094), label = "Garrison Alert", tag = "Alert" },
+    { name = "UI_SILVER_MISSION_COMPLETE_01", id = SK("UI_SILVER_MISSION_COMPLETE_01", 10218), label = "Mission Complete", tag = "UI" },
+    { name = "UI_EPICLOOT_TOAST", id = SK("UI_EPICLOOT_TOAST", 31578), label = "Epic Loot Toast", tag = "UI" },
+    { name = "ALARM_CLOCK_WARNING_3", id = SK("ALARM_CLOCK_WARNING_3", 18871), label = "Alarm Warning", tag = "Alert" },
+    { name = "UI_IG_STORE_WINDOW_OPEN_BUTTON", id = SK("UI_IG_STORE_WINDOW_OPEN_BUTTON", 68816), label = "Store Button Open", tag = "UI" },
+    { name = "PVP_THROUGH_QUEUE", id = SK("PVP_THROUGH_QUEUE", 8458), label = "PvP Through Queue", tag = "Combat" },
 };
+
+local function InferSoundTag(soundName)
+    local upper = string.upper(soundName or "");
+    if string.find(upper, "RAID") or string.find(upper, "WARNING") or string.find(upper, "READY") or string.find(upper, "ALARM") then
+        return "Alert";
+    elseif string.find(upper, "PVP") or string.find(upper, "COMBAT") or string.find(upper, "ARENA") or string.find(upper, "BATTLEGROUND") then
+        return "Combat";
+    elseif string.find(upper, "QUEST") then
+        return "Quest";
+    elseif string.find(upper, "UI_") or string.find(upper, "IG_") then
+        return "UI";
+    end
+    return "Misc";
+end
+
+local function BuildSoundOptionLabel(soundID, soundName, categoryTag, isCurated, curatedLabel)
+    local leadTag = isCurated and "[Curated]" or "[All]";
+    local displayName = curatedLabel and curatedLabel ~= "" and curatedLabel or soundName;
+    return string.format("%s[%s] %s (%d) - %s", leadTag, categoryTag, displayName, soundID, soundName);
+end
 
 local DEFAULT_MAP_PING = SK("MAP_PING", 3175);
 local DEFAULT_SOUNDS = {
@@ -275,11 +296,51 @@ function PingSoundSwap:TryHookPingManager()
 end
 
 function PingSoundSwap:GetSoundOptionData()
-    local container = Settings.CreateControlTextContainer();
-    for _, option in ipairs(SOUND_OPTIONS) do
-        container:Add(option.id, string.format("%s (%d)", option.label, option.id));
+    if self.soundOptionData then
+        return self.soundOptionData;
     end
-    return container:GetData();
+
+    local container = Settings.CreateControlTextContainer();
+
+    local seenSoundIDs = {};
+    for _, option in ipairs(CURATED_SOUND_OPTIONS) do
+        if type(option.id) == "number" and option.id > 0 and not seenSoundIDs[option.id] then
+            local soundName = option.name or "UNKNOWN";
+            local tag = option.tag or InferSoundTag(soundName);
+            container:Add(option.id, BuildSoundOptionLabel(option.id, soundName, tag, true, option.label));
+            seenSoundIDs[option.id] = true;
+        end
+    end
+
+    if type(SOUNDKIT) == "table" then
+        local entries = {};
+        for soundName, soundID in pairs(SOUNDKIT) do
+            if type(soundName) == "string" and type(soundID) == "number" and soundID > 0 then
+                table.insert(entries, { name = soundName, id = soundID });
+            end
+        end
+
+        table.sort(entries, function(a, b)
+            if a.id == b.id then
+                return a.name < b.name;
+            end
+            return a.id < b.id;
+        end);
+
+        for _, entry in ipairs(entries) do
+            if not seenSoundIDs[entry.id] then
+                local tag = InferSoundTag(entry.name);
+                container:Add(entry.id, BuildSoundOptionLabel(entry.id, entry.name, tag, false));
+                seenSoundIDs[entry.id] = true;
+            end
+        end
+    else
+        self:Debug("SOUNDKIT unavailable; dropdown contains curated sounds only.");
+    end
+
+    self.soundOptionData = container:GetData();
+    self:Debug(string.format("Built sound dropdown options: %d entries", #self.soundOptionData));
+    return self.soundOptionData;
 end
 
 function PingSoundSwap:GetCustomProfileOptionData()
