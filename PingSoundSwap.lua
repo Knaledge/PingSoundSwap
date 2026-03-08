@@ -1,10 +1,10 @@
-local ADDON_NAME = ...;
-
 local PingSoundSwap = {};
 PingSoundSwap.frame = CreateFrame("Frame");
 PingSoundSwap.isPingHooked = false;
 PingSoundSwap.settingsRegistered = false;
 PingSoundSwap.categoryID = nil;
+PingSoundSwap.activeProfile = nil;
+PingSoundSwap.activeProfileKey = nil;
 
 local DB_VERSION = 1;
 local PREFIX = "|cff4dc3ffPingSoundSwap:|r ";
@@ -23,6 +23,13 @@ local PING_TYPES = {
     "OnMyWay",
 };
 
+local PING_TYPE_SET = {
+    Attack = true,
+    Warning = true,
+    Assist = true,
+    OnMyWay = true,
+};
+
 local TEXTUREKIT_TO_PING = {
     Attack = "Attack",
     Warning = "Warning",
@@ -31,12 +38,7 @@ local TEXTUREKIT_TO_PING = {
 };
 
 local function IsValidPingType(pingType)
-    for _, value in ipairs(PING_TYPES) do
-        if value == pingType then
-            return true;
-        end
-    end
-    return false;
+    return PING_TYPE_SET[pingType] == true;
 end
 
 local function Print(msg)
@@ -73,30 +75,21 @@ local SOUND_OPTIONS = {
     { id = SK("PVP_THROUGH_QUEUE", 8458), label = "PvP Through Queue" },
 };
 
-local function BuildDefaultSounds()
-    local mapPing = SK("MAP_PING", 3175);
-    return {
-        Attack = mapPing,
-        Warning = mapPing,
-        Assist = mapPing,
-        OnMyWay = mapPing,
-    };
-end
+local DEFAULT_MAP_PING = SK("MAP_PING", 3175);
+local DEFAULT_SOUNDS = {
+    Attack = DEFAULT_MAP_PING,
+    Warning = DEFAULT_MAP_PING,
+    Assist = DEFAULT_MAP_PING,
+    OnMyWay = DEFAULT_MAP_PING,
+};
 
-local function CopyTableShallow(src)
-    local t = {};
-    for k, v in pairs(src) do
-        if type(v) == "table" then
-            local inner = {};
-            for i, j in pairs(v) do
-                inner[i] = j;
-            end
-            t[k] = inner;
-        else
-            t[k] = v;
-        end
-    end
-    return t;
+local function CopyDefaultSounds()
+    return {
+        Attack = DEFAULT_SOUNDS.Attack,
+        Warning = DEFAULT_SOUNDS.Warning,
+        Assist = DEFAULT_SOUNDS.Assist,
+        OnMyWay = DEFAULT_SOUNDS.OnMyWay,
+    };
 end
 
 local function NormalizeCustomKey(text)
@@ -141,7 +134,7 @@ end
 function PingSoundSwap:EnsureProfile(profileKey)
     if not self.db.profiles[profileKey] then
         self.db.profiles[profileKey] = {
-            sounds = CopyTableShallow(BuildDefaultSounds()),
+            sounds = CopyDefaultSounds(),
         };
     end
 
@@ -150,11 +143,16 @@ function PingSoundSwap:EnsureProfile(profileKey)
 
     for _, pingType in ipairs(PING_TYPES) do
         if type(profile.sounds[pingType]) ~= "number" then
-            profile.sounds[pingType] = BuildDefaultSounds()[pingType];
+            profile.sounds[pingType] = DEFAULT_SOUNDS[pingType];
         end
     end
 
     return profile;
+end
+
+function PingSoundSwap:InvalidateActiveProfileCache()
+    self.activeProfile = nil;
+    self.activeProfileKey = nil;
 end
 
 function PingSoundSwap:GetActiveMode()
@@ -171,8 +169,15 @@ function PingSoundSwap:GetActiveProfileKey()
 end
 
 function PingSoundSwap:GetActiveProfile()
+    if self.activeProfile and self.activeProfileKey then
+        return self.activeProfile, self.activeProfileKey;
+    end
+
     local key = self:GetActiveProfileKey();
-    return self:EnsureProfile(key), key;
+    local profile = self:EnsureProfile(key);
+    self.activeProfile = profile;
+    self.activeProfileKey = key;
+    return profile, key;
 end
 
 function PingSoundSwap:SetProfileMode(mode)
@@ -181,12 +186,14 @@ function PingSoundSwap:SetProfileMode(mode)
     end
 
     self.db.profileMode = mode;
+    self:InvalidateActiveProfileCache();
     self:GetActiveProfile();
     return true;
 end
 
 function PingSoundSwap:SetCustomProfileKey(key)
     PingSoundSwapCharDB.customProfileKey = NormalizeCustomKey(key);
+    self:InvalidateActiveProfileCache();
     if self:GetActiveMode() == "custom" then
         self:GetActiveProfile();
     end
@@ -366,7 +373,7 @@ function PingSoundSwap:RegisterSettings()
             variableName,
             Settings.VarType.Number,
             label,
-            BuildDefaultSounds()[pingType],
+            DEFAULT_SOUNDS[pingType],
             GetValue,
             SetValue
         );
@@ -575,6 +582,7 @@ function PingSoundSwap:InitializeDatabase()
 
     PingSoundSwapCharDB.customProfileKey = NormalizeCustomKey(PingSoundSwapCharDB.customProfileKey or "default");
 
+    self:InvalidateActiveProfileCache();
     self:GetActiveProfile();
 end
 
