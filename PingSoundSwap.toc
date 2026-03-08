@@ -6,4 +6,4 @@
 ## SavedVariables: PingSoundSwapDB
 ## SavedVariablesPerCharacter: PingSoundSwapCharDB
 
-Core.lua
+PingSoundSwap.lua
