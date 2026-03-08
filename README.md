@@ -34,20 +34,31 @@ Open the WoW Settings panel, go to AddOns, and select PingSoundSwap.
 
 Available controls:
 
+- Suppress Native Ping Sounds checkbox (optional native ping sound mute).
 - Profile Scope dropdown: Character, Realm, Account, Custom.
 - Custom Profile Key dropdown (for existing custom keys).
-- One dropdown for each ping type sound:
-	- Attack Ping Sound
-	- Warning Ping Sound
-	- Assist Ping Sound
-	- OnMyWay Ping Sound
+- Two dropdowns for each ping type:
+	- Ping Sound List (bucket selector)
+	- Ping Sound (actual SOUNDKIT pick inside selected bucket)
 
-Sound dropdown behavior:
+Ping sound controls:
 
-- Curated/common sounds are pinned at the top.
-- The full SOUNDKIT enumeration is included after curated entries.
-- Dropdown labels include tags such as `Curated`, `UI`, `Alert`, `Combat`, `Quest`, and `Misc`.
-- Each option includes both ID and constant name for easier searching/filtering in the menu.
+	- Attack Ping Sound List / Attack Ping Sound
+	- Warning Ping Sound List / Warning Ping Sound
+	- Assist Ping Sound List / Assist Ping Sound
+	- OnMyWay Ping Sound List / OnMyWay Ping Sound
+
+Sound list bucket behavior:
+
+	- `Curated` contains common high-signal sounds.
+	- Other buckets are grouped by first character (`A`-`Z`, `0-9`, `Other`) to avoid giant unusable menus.
+	- Changing the bucket limits the Ping Sound dropdown to that subset only.
+
+Sound option labels:
+
+	- Include both ID and constant name.
+	- Include an inferred tag such as `UI`, `Alert`, `Combat`, `Quest`, or `Misc`.
+	- Curated entries are marked so you can find defaults quickly.
 
 ## Slash Commands
 
@@ -72,6 +83,7 @@ Sound dropdown behavior:
 
 - PingSoundSwap uses a safe, non-invasive hook strategy to avoid modifying secure ping send paths.
 - The native ping system remains intact; PingSoundSwap overlays custom audio behavior.
+- If `Suppress Native Ping Sounds` is enabled, the addon attempts to set `pingSounds=0` so only replacement sounds are heard.
 
 ## Current Version
 

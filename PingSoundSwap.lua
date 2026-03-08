@@ -6,6 +6,10 @@ PingSoundSwap.categoryID = nil;
 PingSoundSwap.activeProfile = nil;
 PingSoundSwap.activeProfileKey = nil;
 PingSoundSwap.soundOptionData = nil;
+PingSoundSwap.soundIndex = nil;
+PingSoundSwap.soundBucketKeys = nil;
+PingSoundSwap.soundOptionsByBucket = nil;
+PingSoundSwap.lastPlayedAt = {};
 
 local DB_VERSION = 1;
 local PREFIX = "|cff4dc3ffPingSoundSwap:|r ";
@@ -37,6 +41,14 @@ local TEXTUREKIT_TO_PING = {
     Assist = "Assist",
     OnMyWay = "OnMyWay",
 };
+
+local ENUM_TO_PING = {};
+if Enum and Enum.PingSubjectType then
+    ENUM_TO_PING[Enum.PingSubjectType.Attack] = "Attack";
+    ENUM_TO_PING[Enum.PingSubjectType.Warning] = "Warning";
+    ENUM_TO_PING[Enum.PingSubjectType.Assist] = "Assist";
+    ENUM_TO_PING[Enum.PingSubjectType.OnMyWay] = "OnMyWay";
+end
 
 local function IsValidPingType(pingType)
     return PING_TYPE_SET[pingType] == true;
@@ -106,6 +118,29 @@ local function BuildSoundOptionLabel(soundID, soundName, categoryTag, isCurated,
     return string.format("%s[%s] %s (%d) - %s", leadTag, categoryTag, displayName, soundID, soundName);
 end
 
+local function BuildBucketLabel(bucketKey)
+    if bucketKey == "curated" then
+        return "Curated";
+    elseif bucketKey == "other" then
+        return "Other";
+    elseif bucketKey == "digits" then
+        return "0-9";
+    end
+    return string.upper(bucketKey);
+end
+
+local function GetBucketKeyForSoundName(soundName)
+    local first = string.sub(string.upper(soundName or ""), 1, 1);
+    if first == "" then
+        return "other";
+    elseif string.find(first, "%d") then
+        return "digits";
+    elseif string.find(first, "%a") then
+        return string.lower(first);
+    end
+    return "other";
+end
+
 local DEFAULT_MAP_PING = SK("MAP_PING", 3175);
 local DEFAULT_SOUNDS = {
     Attack = DEFAULT_MAP_PING,
@@ -121,6 +156,14 @@ local function CopyDefaultSounds()
         Assist = DEFAULT_SOUNDS.Assist,
         OnMyWay = DEFAULT_SOUNDS.OnMyWay,
     };
+end
+
+local function CountTableKeys(t)
+    local count = 0;
+    for _ in pairs(t or {}) do
+        count = count + 1;
+    end
+    return count;
 end
 
 local function NormalizeCustomKey(text)
@@ -265,16 +308,107 @@ function PingSoundSwap:PlaySoundMaster(soundID)
     return ok and true or false;
 end
 
-function PingSoundSwap:OnPingPinFrameAdded(_frame, uiTextureKit, _isWorldPoint)
-    local pingType = TEXTUREKIT_TO_PING[uiTextureKit];
+function PingSoundSwap:ApplyNativePingSuppression()
+    if type(SetCVar) ~= "function" or type(GetCVar) ~= "function" then
+        self:Debug("CVar API unavailable; cannot manage native ping sound suppression.");
+        return;
+    end
+
+    local desired = self.db.suppressNativePingSounds and "0" or "1";
+    local current = GetCVar("pingSounds");
+    if current ~= desired then
+        SetCVar("pingSounds", desired);
+        self:Debug(string.format("Set CVar pingSounds=%s", desired));
+    end
+end
+
+function PingSoundSwap:IsSoundInBucket(soundID, bucketKey)
+    self:BuildSoundIndex();
+    local entry = self.soundIndex[soundID];
+    if not entry then
+        return false;
+    end
+
+    if bucketKey == "curated" then
+        return entry.curated == true;
+    end
+
+    return entry.bucket == bucketKey;
+end
+
+function PingSoundSwap:GetDefaultSoundForBucket(bucketKey)
+    self:BuildSoundIndex();
+
+    local candidate = nil;
+    for _, entry in pairs(self.soundIndex) do
+        local inBucket = (bucketKey == "curated" and entry.curated) or (bucketKey ~= "curated" and entry.bucket == bucketKey);
+        if inBucket then
+            if not candidate or entry.id < candidate then
+                candidate = entry.id;
+            end
+        end
+    end
+
+    return candidate;
+end
+
+function PingSoundSwap:ExtractPingTypeFromArgs(...)
+    local args = { ... };
+
+    for i = 1, #args do
+        local value = args[i];
+        if type(value) == "string" then
+            local pingType = TEXTUREKIT_TO_PING[value];
+            if pingType then
+                return pingType;
+            end
+        elseif type(value) == "number" then
+            local pingType = ENUM_TO_PING[value];
+            if pingType then
+                return pingType;
+            end
+        elseif type(value) == "table" then
+            local pingEnum = value.pingSubjectType or value.pingType;
+            if type(pingEnum) == "number" then
+                local pingType = ENUM_TO_PING[pingEnum];
+                if pingType then
+                    return pingType;
+                end
+            end
+        end
+    end
+
+    return nil;
+end
+
+function PingSoundSwap:ShouldDebouncePing(pingType)
+    local now = (type(GetTimePreciseSec) == "function") and GetTimePreciseSec() or GetTime();
+    local last = self.lastPlayedAt[pingType];
+    self.lastPlayedAt[pingType] = now;
+
+    if last and (now - last) < 0.06 then
+        return true;
+    end
+
+    return false;
+end
+
+function PingSoundSwap:PlayMappedPingSound(pingType, source)
     if not pingType then
-        self:Debug(string.format("Ignored ping texture kit '%s'", tostring(uiTextureKit)));
+        self:Debug(string.format("Ignored ping event from %s: could not resolve ping type", tostring(source)));
+        return;
+    end
+
+    if self:ShouldDebouncePing(pingType) then
+        self:Debug(string.format("Debounced ping type=%s source=%s", pingType, tostring(source)));
         return;
     end
 
     local soundID = self:GetSoundForPing(pingType);
-    self:Debug(string.format("Ping type=%s texture=%s soundID=%s", pingType, tostring(uiTextureKit), tostring(soundID)));
-    self:PlaySoundMaster(soundID);
+    self:Debug(string.format("Ping type=%s source=%s soundID=%s", pingType, tostring(source), tostring(soundID)));
+    if not self:PlaySoundMaster(soundID) then
+        self:Debug(string.format("Failed to play soundID=%s for pingType=%s", tostring(soundID), tostring(pingType)));
+    end
 end
 
 function PingSoundSwap:TryHookPingManager()
@@ -284,63 +418,185 @@ function PingSoundSwap:TryHookPingManager()
     end
 
     if type(PingManager) == "table" and type(PingManager.OnPingPinFrameAdded) == "function" then
-        hooksecurefunc(PingManager, "OnPingPinFrameAdded", function(_, frame, uiTextureKit, isWorldPoint)
-            PingSoundSwap:OnPingPinFrameAdded(frame, uiTextureKit, isWorldPoint);
+        hooksecurefunc(PingManager, "OnPingPinFrameAdded", function(...)
+            local pingType = PingSoundSwap:ExtractPingTypeFromArgs(...);
+            PingSoundSwap:PlayMappedPingSound(pingType, "OnPingPinFrameAdded");
         end);
+
+        if type(PingManager.OnPingAdded) == "function" then
+            hooksecurefunc(PingManager, "OnPingAdded", function(...)
+                local pingType = PingSoundSwap:ExtractPingTypeFromArgs(...);
+                PingSoundSwap:PlayMappedPingSound(pingType, "OnPingAdded");
+            end);
+        end
+
         self.isPingHooked = true;
         Print("Ping hook active.");
-        self:Debug("Hooked PingManager:OnPingPinFrameAdded via hooksecurefunc.");
+        self:Debug("Hooked PingManager ping callbacks via hooksecurefunc.");
     else
         self:Debug("PingManager not ready; hook deferred.");
     end
 end
 
 function PingSoundSwap:GetSoundOptionData()
-    if self.soundOptionData then
-        return self.soundOptionData;
+    return self:GetSoundOptionDataForBucket("curated");
+end
+
+function PingSoundSwap:BuildSoundIndex()
+    if self.soundIndex and self.soundBucketKeys and self.soundOptionsByBucket then
+        return;
     end
 
-    local container = Settings.CreateControlTextContainer();
+    self.soundIndex = {};
+    self.soundBucketKeys = { "curated", "digits" };
+    self.soundOptionsByBucket = {};
 
-    local seenSoundIDs = {};
+    local seenBucketKey = {
+        curated = true,
+        digits = true,
+    };
+
+    local curatedByID = {};
     for _, option in ipairs(CURATED_SOUND_OPTIONS) do
-        if type(option.id) == "number" and option.id > 0 and not seenSoundIDs[option.id] then
-            local soundName = option.name or "UNKNOWN";
-            local tag = option.tag or InferSoundTag(soundName);
-            container:Add(option.id, BuildSoundOptionLabel(option.id, soundName, tag, true, option.label));
-            seenSoundIDs[option.id] = true;
+        if type(option.id) == "number" and option.id > 0 and not curatedByID[option.id] then
+            curatedByID[option.id] = option;
         end
+    end
+
+    for soundID, curated in pairs(curatedByID) do
+        self.soundIndex[soundID] = {
+            id = soundID,
+            name = curated.name,
+            label = curated.label,
+            tag = curated.tag or InferSoundTag(curated.name),
+            curated = true,
+            bucket = "curated",
+        };
     end
 
     if type(SOUNDKIT) == "table" then
-        local entries = {};
         for soundName, soundID in pairs(SOUNDKIT) do
-            if type(soundName) == "string" and type(soundID) == "number" and soundID > 0 then
-                table.insert(entries, { name = soundName, id = soundID });
+            if type(soundName) == "string" and type(soundID) == "number" and soundID > 0 and not self.soundIndex[soundID] then
+                local bucketKey = GetBucketKeyForSoundName(soundName);
+                self.soundIndex[soundID] = {
+                    id = soundID,
+                    name = soundName,
+                    label = nil,
+                    tag = InferSoundTag(soundName),
+                    curated = false,
+                    bucket = bucketKey,
+                };
+
+                if not seenBucketKey[bucketKey] then
+                    seenBucketKey[bucketKey] = true;
+                    table.insert(self.soundBucketKeys, bucketKey);
+                end
             end
         end
-
-        table.sort(entries, function(a, b)
-            if a.id == b.id then
-                return a.name < b.name;
-            end
-            return a.id < b.id;
-        end);
-
-        for _, entry in ipairs(entries) do
-            if not seenSoundIDs[entry.id] then
-                local tag = InferSoundTag(entry.name);
-                container:Add(entry.id, BuildSoundOptionLabel(entry.id, entry.name, tag, false));
-                seenSoundIDs[entry.id] = true;
-            end
-        end
-    else
-        self:Debug("SOUNDKIT unavailable; dropdown contains curated sounds only.");
     end
 
-    self.soundOptionData = container:GetData();
-    self:Debug(string.format("Built sound dropdown options: %d entries", #self.soundOptionData));
-    return self.soundOptionData;
+    table.sort(self.soundBucketKeys, function(a, b)
+        local order = {
+            curated = 1,
+            digits = 2,
+            other = 999,
+        };
+        local oa = order[a] or 100;
+        local ob = order[b] or 100;
+        if oa == ob then
+            return a < b;
+        end
+        return oa < ob;
+    end);
+
+    self:Debug(string.format("Sound index built with %d entries and %d buckets", CountTableKeys(self.soundIndex), #self.soundBucketKeys));
+end
+
+function PingSoundSwap:GetSoundBucketOptionData()
+    self:BuildSoundIndex();
+
+    local container = Settings.CreateControlTextContainer();
+    for _, bucketKey in ipairs(self.soundBucketKeys) do
+        container:Add(bucketKey, BuildBucketLabel(bucketKey));
+    end
+    return container:GetData();
+end
+
+function PingSoundSwap:GetSoundOptionDataForBucket(bucketKey)
+    self:BuildSoundIndex();
+    bucketKey = bucketKey or "curated";
+
+    if self.soundOptionsByBucket[bucketKey] then
+        return self.soundOptionsByBucket[bucketKey];
+    end
+
+    local container = Settings.CreateControlTextContainer();
+    local entries = {};
+
+    for _, entry in pairs(self.soundIndex) do
+        if bucketKey == "curated" then
+            if entry.curated then
+                table.insert(entries, entry);
+            end
+        elseif entry.bucket == bucketKey then
+            table.insert(entries, entry);
+        end
+    end
+
+    table.sort(entries, function(a, b)
+        if a.curated ~= b.curated then
+            return a.curated;
+        end
+        if a.id == b.id then
+            return a.name < b.name;
+        end
+        return a.id < b.id;
+    end);
+
+    for _, entry in ipairs(entries) do
+        container:Add(entry.id, BuildSoundOptionLabel(entry.id, entry.name, entry.tag, entry.curated, entry.label));
+    end
+
+    self.soundOptionsByBucket[bucketKey] = container:GetData();
+    return self.soundOptionsByBucket[bucketKey];
+end
+
+function PingSoundSwap:GetSoundBucketForPing(pingType)
+    self:BuildSoundIndex();
+    local bucketMap = self.db.soundBuckets or {};
+    local bucket = bucketMap[pingType] or "curated";
+
+    for _, key in ipairs(self.soundBucketKeys) do
+        if key == bucket then
+            return bucket;
+        end
+    end
+
+    return "curated";
+end
+
+function PingSoundSwap:SetSoundBucketForPing(pingType, bucketKey)
+    if not IsValidPingType(pingType) then
+        return false;
+    end
+
+    self:BuildSoundIndex();
+
+    local valid = false;
+    for _, key in ipairs(self.soundBucketKeys) do
+        if key == bucketKey then
+            valid = true;
+            break;
+        end
+    end
+
+    if not valid then
+        return false;
+    end
+
+    self.db.soundBuckets = self.db.soundBuckets or {};
+    self.db.soundBuckets[pingType] = bucketKey;
+    return true;
 end
 
 function PingSoundSwap:GetCustomProfileOptionData()
@@ -371,6 +627,29 @@ function PingSoundSwap:RegisterSettings()
     end
 
     local category, _layout = Settings.RegisterVerticalLayoutCategory("PingSoundSwap");
+
+    do
+        local function GetValue()
+            return PingSoundSwap.db.suppressNativePingSounds == true;
+        end
+
+        local function SetValue(value)
+            PingSoundSwap.db.suppressNativePingSounds = value and true or false;
+            PingSoundSwap:ApplyNativePingSuppression();
+        end
+
+        local setting = Settings.RegisterProxySetting(
+            category,
+            "PINGSOUNDSWAP_SUPPRESS_NATIVE",
+            Settings.VarType.Boolean,
+            "Suppress Native Ping Sounds",
+            false,
+            GetValue,
+            SetValue
+        );
+
+        Settings.CreateCheckbox(category, setting, "When enabled, attempts to disable Blizzard's native ping sound so only your selected replacement is heard.");
+    end
 
     do
         local function GetValue()
@@ -430,6 +709,43 @@ function PingSoundSwap:RegisterSettings()
     end
 
     for _, pingType in ipairs(PING_TYPES) do
+        do
+            local bucketVariableName = "PINGSOUNDSWAP_BUCKET_" .. string.upper(pingType);
+            local bucketLabel = string.format("%s Sound List", pingType);
+
+            local function GetBucketValue()
+                return PingSoundSwap:GetSoundBucketForPing(pingType);
+            end
+
+            local function SetBucketValue(value)
+                if PingSoundSwap:SetSoundBucketForPing(pingType, value) then
+                    local currentSoundID = PingSoundSwap:GetSoundForPing(pingType);
+                    if not PingSoundSwap:IsSoundInBucket(currentSoundID, value) then
+                        local fallbackSoundID = PingSoundSwap:GetDefaultSoundForBucket(value);
+                        if fallbackSoundID then
+                            PingSoundSwap:SetSoundForPing(pingType, fallbackSoundID);
+                        end
+                    end
+                end
+            end
+
+            local function GetBucketOptions()
+                return PingSoundSwap:GetSoundBucketOptionData();
+            end
+
+            local bucketSetting = Settings.RegisterProxySetting(
+                category,
+                bucketVariableName,
+                Settings.VarType.String,
+                bucketLabel,
+                "curated",
+                GetBucketValue,
+                SetBucketValue
+            );
+
+            Settings.CreateDropdown(category, bucketSetting, GetBucketOptions, string.format("Choose which group of SOUNDKIT entries is shown for %s.", pingType));
+        end
+
         local variableName = "PINGSOUNDSWAP_SOUND_" .. string.upper(pingType);
         local label = string.format("%s Ping Sound", pingType);
 
@@ -442,7 +758,8 @@ function PingSoundSwap:RegisterSettings()
         end
 
         local function GetOptions()
-            return PingSoundSwap:GetSoundOptionData();
+            local bucketKey = PingSoundSwap:GetSoundBucketForPing(pingType);
+            return PingSoundSwap:GetSoundOptionDataForBucket(bucketKey);
         end
 
         local setting = Settings.RegisterProxySetting(
@@ -677,14 +994,25 @@ function PingSoundSwap:InitializeDatabase()
 
     self.db.profiles = self.db.profiles or {};
     self.db.profileMode = self.db.profileMode or "character";
+    self.db.soundBuckets = self.db.soundBuckets or {};
+    if type(self.db.suppressNativePingSounds) ~= "boolean" then
+        self.db.suppressNativePingSounds = false;
+    end
     if type(self.db.debug) ~= "boolean" then
         self.db.debug = false;
+    end
+
+    for _, pingType in ipairs(PING_TYPES) do
+        if type(self.db.soundBuckets[pingType]) ~= "string" or self.db.soundBuckets[pingType] == "" then
+            self.db.soundBuckets[pingType] = "curated";
+        end
     end
 
     PingSoundSwapCharDB.customProfileKey = NormalizeCustomKey(PingSoundSwapCharDB.customProfileKey or "default");
 
     self:InvalidateActiveProfileCache();
     self:GetActiveProfile();
+    self:ApplyNativePingSuppression();
     self:Debug("Database initialized.");
 end
 
